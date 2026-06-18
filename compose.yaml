@@ -1,0 +1,14 @@
+services:
+  media-renamer:
+    build: .
+    container_name: media-renamer
+    restart: unless-stopped
+    working_dir: /app
+    env_file:
+      - .env
+    ports:
+      - "8089:8080"
+    volumes:
+      - /mnt/CloudNAS/CloudDrive/115open/最近接收:/media/最近接收
+      - ./config:/app/config
+      - ./data:/app/data

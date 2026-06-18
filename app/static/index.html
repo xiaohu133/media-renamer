@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Media Renamer</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#1a1a2e;color:#eee;min-height:100vh}
+.app{max-width:1000px;margin:0 auto;padding:20px}
+h1{text-align:center;margin-bottom:20px;color:#64ffda;font-size:1.5rem}
+.tabs{display:flex;gap:4px;margin-bottom:20px;flex-wrap:wrap}
+.tabs button{padding:8px 16px;border:none;background:#16213e;color:#aaa;border-radius:6px 6px 0 0;cursor:pointer;font-size:14px}
+.tabs button.active{background:#0f3460;color:#64ffda}
+.panel{background:#16213e;border-radius:8px;padding:20px;min-height:300px}
+.card{background:#0f3460;border-radius:6px;padding:16px;margin-bottom:12px}
+.card h3{color:#64ffda;margin-bottom:8px;font-size:14px}
+.stat{font-size:24px;font-weight:bold}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+input,textarea{background:#1a1a2e;border:1px solid #333;color:#eee;padding:8px 12px;border-radius:4px;width:100%;font-size:14px}
+textarea{min-height:100px;font-family:monospace;resize:vertical}
+.btn{padding:8px 16px;border:none;border-radius:4px;cursor:pointer;font-size:14px;margin-right:8px;margin-top:8px}
+.btn-primary{background:#64ffda;color:#1a1a2e;font-weight:bold}
+.btn-danger{background:#ff6b6b;color:#fff}
+.btn-secondary{background:#333;color:#eee}
+.log-list{max-height:500px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.6}
+.log-line{padding:2px 8px;border-bottom:1px solid #1a1a2e;word-break:break-all}
+.log-line:nth-child(odd){background:#0a1628}
+.plan-list{max-height:400px;overflow-y:auto}
+.plan-item{padding:6px 8px;border-bottom:1px solid #1a1a2e;font-size:13px;font-family:monospace;word-break:break-all}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;margin-bottom:4px;color:#64ffda;font-size:13px}
+.path-row{display:flex;gap:8px;margin-bottom:6px;align-items:center}
+.path-row input{flex:1}
+.mapping-row{display:flex;gap:8px;margin-bottom:6px;align-items:center}
+.mapping-row input{flex:1}
+.msg{padding:10px;border-radius:4px;margin-bottom:12px}
+.msg-ok{background:#1b4332;color:#95d5b2}
+.msg-err{background:#3d0000;color:#ff6b6b}
+.search-bar{margin-bottom:12px;display:flex;gap:8px}
+.search-bar input{flex:1}
+</style>
+</head>
+<body>
+<div id="app" class="app">
+<h1>Media Renamer</h1>
+<div class="tabs">
+<button v-for="t in tabs" :key="t[0]" :class="{active:tab===t[0]}" @click="switchTab(t[0])">{{t[1]}}</button>
+</div>
+<div v-if="msg" :class="['msg','msg-'+msg.t]">{{msg.s}}</div>
+
+<!-- Dashboard -->
+<div class="panel" v-if="tab==='dashboard'">
+<div class="stats-grid">
+<div class="card"><h3>媒体库路径</h3><div v-for="r in st.media_roots" style="font-size:13px;margin-top:4px">{{r}}</div></div>
+<div class="card"><h3>已处理文件</h3><div class="stat">{{st.handled_count}}</div></div>
+<div class="card"><h3>待处理计划</h3><div class="stat">{{st.planned_count}}</div></div>
+<div class="card"><h3>日志条数</h3><div class="stat">{{st.log_lines}}</div></div>
+</div>
+<button class="btn btn-primary" @click="loadStatus">刷新</button>
+</div>
+
+<!-- Logs -->
+<div class="panel" v-if="tab==='logs'">
+<div class="search-bar">
+<input v-model="logSearch" placeholder="搜索日志..." @keyup.enter="loadLogs">
+<button class="btn btn-primary" @click="loadLogs">搜索</button>
+</div>
+<div class="log-list">
+<div class="log-line" v-for="(l,i) in logs" :key="i">{{l}}</div>
+<div v-if="!logs.length" style="color:#666;padding:20px;text-align:center">暂无日志</div>
+</div>
+</div>
+
+<!-- Scan -->
+<div class="panel" v-if="tab==='scan'">
+<div class="form-group">
+<label>最近小时数（留空使用默认）</label>
+<input v-model.number="scanHours" type="number" placeholder="24" style="width:120px">
+</div>
+<div class="form-group">
+<label>数量限制（0=不限）</label>
+<input v-model.number="scanLimit" type="number" placeholder="0" style="width:120px">
+</div>
+<button class="btn btn-primary" @click="runPlan" :disabled="scanning">预览计划</button>
+<button class="btn btn-secondary" @click="runScan(true)" :disabled="scanning">Dry Run</button>
+<button class="btn btn-danger" @click="runScan(false)" :disabled="scanning">执行重命名</button>
+<div v-if="scanning" style="color:#64ffda;padding:20px;text-align:center">执行中...</div>
+<div class="plan-list" v-if="scanResults.length">
+<div class="plan-item" v-for="(r,i) in scanResults" :key="i">{{r}}</div>
+</div>
+</div>
+
+<!-- Config -->
+<div class="panel" v-if="tab==='config'">
+<div class="form-group">
+<label>媒体库路径</label>
+<div class="path-row" v-for="(p,i) in cf.media_roots" :key="i">
+<input v-model="cf.media_roots[i]">
+<button class="btn btn-danger" @click="cf.media_roots.splice(i,1)">删除</button>
+</div>
+<button class="btn btn-secondary" @click="cf.media_roots.push('')">添加路径</button>
+</div>
+<div class="form-group">
+<label>默认扫描小时数</label>
+<input v-model.number="cf.recent_hours_default" type="number" style="width:120px">
+</div>
+<div class="form-group">
+<label>视频扩展名（逗号分隔）</label>
+<input v-model="cf.ext_video">
+</div>
+<div class="form-group">
+<label>字幕扩展名（逗号分隔）</label>
+<input v-model="cf.ext_subtitle">
+</div>
+<div class="form-group">
+<label>光盘扩展名（逗号分隔）</label>
+<input v-model="cf.ext_disc">
+</div>
+<div class="form-group">
+<label>命名规则 - 电影目录</label>
+<input v-model="cf.naming.movie_dir">
+</div>
+<div class="form-group">
+<label>命名规则 - 电影文件</label>
+<input v-model="cf.naming.movie_file">
+</div>
+<div class="form-group">
+<label>命名规则 - 剧集目录</label>
+<input v-model="cf.naming.episode_dir">
+</div>
+<div class="form-group">
+<label>命名规则 - 剧集文件</label>
+<input v-model="cf.naming.episode_file">
+</div>
+<div class="form-group">
+<label>命名规则 - 字幕文件</label>
+<input v-model="cf.naming.subtitle_file">
+</div>
+<div class="form-group">
+<label>忽略目录（逗号分隔）</label>
+<input v-model="cf.ignore_dirs_str">
+</div>
+<button class="btn btn-primary" @click="saveConfig">保存配置</button>
+</div>
+
+<!-- Rules -->
+<div class="panel" v-if="tab==='rules'">
+<p style="margin-bottom:12px;color:#aaa;font-size:13px">标题映射规则：英文标题 → 中文标题</p>
+<div class="mapping-row" v-for="(item,i) in mappingList" :key="i">
+<input v-model="item.key" placeholder="英文标题">
+<input v-model="item.val" placeholder="中文标题">
+<button class="btn btn-danger" @click="mappingList.splice(i,1)">删除</button>
+</div>
+<button class="btn btn-secondary" @click="mappingList.push({key:'',val:''})">添加映射</button>
+<br>
+<button class="btn btn-primary" @click="saveMappings" style="margin-top:12px">保存规则</button>
+</div>
+
+</div>
+
+<script>
+const {createApp, ref, reactive, onMounted} = Vue;
+createApp({
+setup() {
+  const tab = ref('dashboard');
+  const tabs = [['dashboard','仪表盘'],['logs','日志'],['scan','扫描'],['config','配置'],['rules','规则']];
+  const msg = ref(null);
+  const st = reactive({media_roots:[],handled_count:0,planned_count:0,log_lines:0});
+  const logs = ref([]);
+  const logSearch = ref('');
+  const scanHours = ref(null);
+  const scanLimit = ref(0);
+  const scanning = ref(false);
+  const scanResults = ref([]);
+  const cf = reactive({media_roots:[],recent_hours_default:24,ext_video:'',ext_subtitle:'',ext_disc:'',naming:{movie_dir:'',movie_file:'',episode_dir:'',episode_file:'',subtitle_file:''},ignore_dirs_str:''});
+  const mappingList = ref([]);
+
+  function showMsg(s, t='ok'){msg.value={s,t}; setTimeout(()=>msg.value=null, 3000);}
+
+  async function loadStatus(){
+    try{const r=await fetch('/api/status');const d=await r.json();Object.assign(st,d);}
+    catch(e){showMsg('加载失败:'+e.message,'err');}
+  }
+
+  async function loadLogs(){
+    try{
+      const params=new URLSearchParams({tail:'200'});
+      if(logSearch.value)params.set('search',logSearch.value);
+      const r=await fetch('/api/logs?'+params);const d=await r.json();logs.value=d.lines;
+    }catch(e){showMsg('加载日志失败','err');}
+  }
+
+  async function loadConfig(){
+    try{
+      const r=await fetch('/api/config');const d=await r.json();
+      cf.media_roots=d.media_roots||[];
+      cf.recent_hours_default=d.recent_hours_default||24;
+      cf.ext_video=(d.extensions&&d.extensions.video||[]).join(',');
+      cf.ext_subtitle=(d.extensions&&d.extensions.subtitle||[]).join(',');
+      cf.ext_disc=(d.extensions&&d.extensions.disc||[]).join(',');
+      cf.naming=d.naming||{movie_dir:'',movie_file:'',episode_dir:'',episode_file:'',subtitle_file:''};
+      cf.ignore_dirs_str=(d.ignore_dirs||[]).join(',');
+    }catch(e){showMsg('加载配置失败','err');}
+  }
+
+  async function saveConfig(){
+    const body={
+      media_roots:cf.media_roots.filter(x=>x.trim()),
+      recent_hours_default:cf.recent_hours_default,
+      extensions:{video:cf.ext_video.split(',').map(x=>x.trim()).filter(Boolean),subtitle:cf.ext_subtitle.split(',').map(x=>x.trim()).filter(Boolean),disc:cf.ext_disc.split(',').map(x=>x.trim()).filter(Boolean)},
+      naming:cf.naming,
+      ignore_dirs:cf.ignore_dirs_str.split(',').map(x=>x.trim()).filter(Boolean)
+    };
+    try{
+      const r=await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(r.ok)showMsg('配置已保存');else showMsg('保存失败','err');
+    }catch(e){showMsg('保存失败:'+e.message,'err');}
+  }
+
+  async function loadMappings(){
+    try{
+      const r=await fetch('/api/title-mappings');const d=await r.json();
+      const m=d.title_mappings||{};
+      mappingList.value=Object.entries(m).map(([k,v])=>({key:k,val:v}));
+    }catch(e){showMsg('加载规则失败','err');}
+  }
+
+  async function saveMappings(){
+    const obj={};
+    mappingList.value.forEach(item=>{if(item.key.trim())obj[item.key.trim()]=item.val;});
+    try{
+      const r=await fetch('/api/title-mappings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({title_mappings:obj})});
+      if(r.ok)showMsg('规则已保存');else showMsg('保存失败','err');
+    }catch(e){showMsg('保存失败:'+e.message,'err');}
+  }
+
+  async function runPlan(){
+    scanning.value=true;scanResults.value=[];
+    try{
+      const body={dry_run:true,recent_hours:scanHours.value||null,limit:scanLimit.value};
+      const r=await fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const d=await r.json();scanResults.value=d.plans||[];
+      if(!scanResults.value.length)showMsg('没有待处理文件');
+    }catch(e){showMsg('执行失败:'+e.message,'err');}
+    scanning.value=false;
+  }
+
+  async function runScan(dryRun){
+    if(!dryRun&&!confirm('确认执行实际重命名操作？'))return;
+    scanning.value=true;scanResults.value=[];
+    try{
+      const body={dry_run:dryRun,recent_hours:scanHours.value||null,limit:scanLimit.value};
+      const r=await fetch('/api/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const d=await r.json();scanResults.value=d.results||[];
+      showMsg(dryRun?'Dry run 完成':'执行完成');
+    }catch(e){showMsg('执行失败:'+e.message,'err');}
+    scanning.value=false;
+  }
+
+  function switchTab(t){
+    tab.value=t;
+    if(t==='logs')loadLogs();
+    if(t==='config')loadConfig();
+    if(t==='rules')loadMappings();
+  }
+
+  onMounted(()=>{loadStatus();});
+
+  return {tab,tabs,msg,st,logs,logSearch,scanHours,scanLimit,scanning,scanResults,cf,mappingList,
+          showMsg,loadStatus,loadLogs,loadConfig,saveConfig,loadMappings,saveMappings,runPlan,runScan,switchTab};
+}
+}).mount('#app');
+</script>
+</body>
+</html>
+
