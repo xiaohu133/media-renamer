@@ -99,6 +99,38 @@ command: ["watch", "--interval", "60", "--stable-seconds", "120", "--dry-run"]
 docker compose up -d
 ```
 
+## Web UI
+
+项目内置了基于 FastAPI 的 Web 管理界面，容器启动后自动运行。
+
+- **容器内端口**：`8080`
+- **默认映射到宿主机**：`8089`
+- **访问地址**：`http://<服务器IP>:8089`
+
+### Web UI 功能
+
+| 接口 | 说明 |
+|------|------|
+| `GET /` | Web 管理面板首页 |
+| `GET /api/status` | 查看运行状态（已处理数、计划数、日志行数） |
+| `GET /api/config` | 查看当前配置 |
+| `PUT /api/config` | 修改配置（媒体目录、扩展名、命名规则等） |
+| `GET /api/title-mappings` | 查看中文标题映射 |
+| `PUT /api/title-mappings` | 修改中文标题映射 |
+| `GET /api/logs?tail=100&search=xxx` | 查看操作日志 |
+| `POST /api/plan` | 生成重命名计划（预览） |
+| `POST /api/scan` | 执行扫描（支持 dry-run 或正式执行） |
+| `DELETE /api/state` | 清空已处理状态 |
+
+### 修改 Web UI 端口
+
+编辑 `compose.yaml` 中的 ports 映射：
+
+```yaml
+ports:
+  - "8089:8080"   # 改左边的数字即可，比如改成 9090:8080
+```
+
 ## 配置
 
 默认挂载：
@@ -124,9 +156,25 @@ docker compose up -d
 4. `docker compose up -d`
 5. 观察日志确认行为符合预期
 
+## 快速部署
+
+```bash
+git clone https://github.com/xiaohu133/media-renamer.git
+cd media-renamer
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 填入你的 TMDB API key
+
+# 修改 compose.yaml 中的媒体库挂载路径为你实际的路径
+
+# 构建并启动
+docker compose up -d --build
+
+# 访问 Web UI
+# http://<服务器IP>:8089
+```
+
 ## 当前限制
 
-- 第一版仍不接 TMDB / 豆瓣
-- 不自动猜中文译名
-- 主要依赖文件名和现有样本做规范化
 - 对无法可靠识别标题/年份的文件会跳过
